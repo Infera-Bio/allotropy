@@ -52,9 +52,13 @@ class LuminexIntelliflexParser(VendorParser[Data, Model]):
             for line in lines:
                 stripped = line.strip()
                 if stripped:
-                    return stripped.startswith("Program,") or stripped.startswith(
-                        '"Program",'
-                    )
+                    if not (
+                        stripped.startswith("Program,")
+                        or stripped.startswith('"Program",')
+                    ):
+                        return False
+                    fields = [f.strip().strip('"') for f in stripped.split(",")]
+                    return len(fields) > 3 and fields[3].lower() == "intelliflex"
             return False
         except Exception:
             return False
