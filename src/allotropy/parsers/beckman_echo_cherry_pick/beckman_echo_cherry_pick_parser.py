@@ -37,6 +37,11 @@ class BeckmanEchoCherryPickParser(VendorParser[Data, Model]):
                 raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
             )
             lines = text.splitlines()
+            # Cherry Pick and Plate Reformat reports share one layout; the header's
+            # "Application Name" says which Echo application wrote the file.
+            for line in lines[:20]:
+                if line.startswith("Application Name,") and "Plate Reformat" in line:
+                    return False
             for line in lines[:20]:
                 if re.match(r"^\[.+\]", line):
                     return True
