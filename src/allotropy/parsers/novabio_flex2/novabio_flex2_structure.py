@@ -22,7 +22,6 @@ from allotropy.parsers.novabio_flex2.constants import (
     DETECTION_PROPERTY_MAPPING,
     DEVICE_TYPE,
     FILENAME_REGEX,
-    INVALID_FILENAME_MESSAGE,
     MEASURED_PROPERTIES_BY_DETECTION_TYPE,
     MODEL_NUMBER,
     PRODUCT_MANUFACTURER,
@@ -36,16 +35,19 @@ from allotropy.parsers.utils.warnings_tools import suppress_unused_keys_warning
 
 @dataclass(frozen=True)
 class Title:
-    processing_time: str
+    processing_time: str | None
     device_identifier: str | None
 
     @staticmethod
     def create(file_path: str) -> Title:
+        """The processing time and analyzer ID the Flex2 writes into the file name. A file
+        that was renamed (or uploaded under another name) still holds every sample, its
+        own measurement time and the analyzer's results, so it is read without them."""
         filename = Path(file_path).name
         matches = re.match(FILENAME_REGEX, filename, flags=re.IGNORECASE)
 
         if not matches:
-            raise AllotropeConversionError(INVALID_FILENAME_MESSAGE.format(filename))
+            return Title(processing_time=None, device_identifier=None)
 
         matches_dict = matches.groupdict()
         return Title(

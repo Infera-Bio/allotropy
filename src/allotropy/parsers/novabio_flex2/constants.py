@@ -5,11 +5,6 @@ PRODUCT_MANUFACTURER = "Nova Biomedical"
 
 FILENAME_REGEX = r"^SampleResults(?P<device_identifier>.*)?(?P<processing_time>\d{4}-\d{2}-\d{2}_\d{6})\.csv$"
 
-INVALID_FILENAME_MESSAGE = (
-    "{} is not valid. File name is expected to have format of SampleResultsYYYY-MM-DD_HHMMSS.csv "
-    "or SampleResults<Analyzer ID>YYYY-MM-DD_HHMMSS.csv where <Analyzer ID> is defined in Settings"
-)
-
 ANALYTE_MAPPINGS = {
     "NH4+": {
         "name": "ammonium",

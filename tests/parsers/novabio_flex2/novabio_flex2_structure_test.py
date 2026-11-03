@@ -1,4 +1,3 @@
-import re
 from typing import Any
 
 import pandas as pd
@@ -49,11 +48,9 @@ def test_create_title(
         "SampleResults2021-02-18_104838T26918070C.csv",  # wrong order of timestamp and identifier
     ),
 )
-def test_create_title_invalid_filename(filename: str) -> None:
-    expected_regex_raw = f"{filename} is not valid. File name is expected to have format of SampleResultsYYYY-MM-DD_HHMMSS.csv or SampleResults<Analyzer ID>YYYY-MM-DD_HHMMSS.csv where <Analyzer ID> is defined in Settings"
-    expected_regex = re.escape(expected_regex_raw)
-    with pytest.raises(AllotropeConversionError, match=expected_regex):
-        Title.create(filename)
+def test_create_title_unrecognized_filename(filename: str) -> None:
+    # A renamed export still holds every sample; only the name's metadata is unknown.
+    assert Title.create(filename) == Title(processing_time=None, device_identifier=None)
 
 
 def test_create_sample() -> None:
