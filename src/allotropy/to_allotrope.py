@@ -1,16 +1,55 @@
+import codecs
+from contextlib import nullcontext
 from datetime import tzinfo
+import hashlib
 from io import BytesIO
 import os
 from typing import Any
 
 from allotropy.allotrope.allotrope import serialize_and_validate_allotrope
+from allotropy.constants import CHARDET_ENCODING, DEFAULT_ENCODING
 from allotropy.exceptions import AllotropeConversionError
 from allotropy.named_file_contents import NamedFileContents
 from allotropy.parser_factory import discover_vendor, Vendor
 from allotropy.parsers.utils.locale_context import set_locale_context
+from allotropy.parsers.utils.uuids import content_derived_ids
 from allotropy.types import IOType
 
 VendorType = Vendor | str
+
+_CHUNK_SIZE = 1 << 20
+
+
+def _default_encoding(contents: IOType, encoding: str | None) -> str | None:
+    """An unspecified encoding means UTF-8, unless the bytes are not UTF-8: then the
+    encoding is detected, so an export written in UTF-16 or a Windows code page is
+    read too."""
+    if encoding is not None:
+        return encoding
+    decoder = codecs.getincrementaldecoder(DEFAULT_ENCODING)()
+    contents.seek(0)
+    try:
+        while chunk := contents.read(_CHUNK_SIZE):
+            if isinstance(chunk, str):
+                return None
+            decoder.decode(chunk)
+        decoder.decode(b"", final=True)
+    except UnicodeDecodeError:
+        return CHARDET_ENCODING
+    finally:
+        contents.seek(0)
+    return None
+
+
+def _sha256(contents: IOType) -> bytes:
+    digest = hashlib.sha256()
+    contents.seek(0)
+    while chunk := contents.read(_CHUNK_SIZE):
+        digest.update(
+            chunk.encode(DEFAULT_ENCODING) if isinstance(chunk, str) else chunk
+        )
+    contents.seek(0)
+    return digest.digest()
 
 
 def allotrope_from_io(
@@ -20,9 +59,17 @@ def allotrope_from_io(
     default_timezone: tzinfo | None = None,
     encoding: str | None = None,
     locale: str | None = None,
+    *,
+    deterministic_ids: bool = False,
 ) -> dict[str, Any]:
     model = allotrope_model_from_io(
-        contents, filepath, vendor_type, default_timezone, encoding, locale
+        contents,
+        filepath,
+        vendor_type,
+        default_timezone,
+        encoding,
+        locale,
+        deterministic_ids=deterministic_ids,
     )
     return serialize_and_validate_allotrope(model)
 
@@ -34,8 +81,15 @@ def allotrope_model_from_io(
     default_timezone: tzinfo | None = None,
     encoding: str | None = None,
     locale: str | None = None,
+    *,
+    deterministic_ids: bool = False,
 ) -> Any:
-    named_file_contents = NamedFileContents(contents, filepath, encoding)
+    """With deterministic_ids, every identifier in the document derives from the file's
+    bytes, so one file always converts to the same document."""
+    ids = content_derived_ids(_sha256(contents)) if deterministic_ids else nullcontext()
+    named_file_contents = NamedFileContents(
+        contents, filepath, _default_encoding(contents, encoding)
+    )
 
     if vendor_type is None:
         vendor = discover_vendor(named_file_contents)
@@ -51,11 +105,12 @@ def allotrope_model_from_io(
             raise AllotropeConversionError(msg)
 
     parser = vendor.get_parser(default_timezone=default_timezone)
-    if locale:
-        with set_locale_context(locale):
+    with ids:
+        if locale:
+            with set_locale_context(locale):
+                return parser.to_allotrope(named_file_contents)
+        else:
             return parser.to_allotrope(named_file_contents)
-    else:
-        return parser.to_allotrope(named_file_contents)
 
 
 def allotrope_from_file(
@@ -112,5 +167,7 @@ def vendor_from_file(filepath: str, encoding: str | None = None) -> Vendor:
 def vendor_from_io(
     contents: IOType, filepath: str, encoding: str | None = None
 ) -> Vendor:
-    named_file_contents = NamedFileContents(contents, filepath, encoding)
+    named_file_contents = NamedFileContents(
+        contents, filepath, _default_encoding(contents, encoding)
+    )
     return discover_vendor(named_file_contents)
