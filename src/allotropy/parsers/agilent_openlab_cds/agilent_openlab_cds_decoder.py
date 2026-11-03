@@ -96,12 +96,15 @@ def decode_data_cubes(
     :param datacube_path: detection file path
     :return: decoded datacube
     """
-    with tempfile.NamedTemporaryFile(
-        "wb", suffix=Path(datacube_file_name).suffix
-    ) as fp:
-        fp.write(datacube_file.read())
-        fp.seek(0)
-        raw_data = rb.parse_ch(fp.name)
+    # rainbow reopens the file by name. Windows does not let a second handle open a
+    # NamedTemporaryFile that is still open, so write it, close it, then parse it.
+    fd, path = tempfile.mkstemp(suffix=Path(datacube_file_name).suffix)
+    try:
+        with os.fdopen(fd, "wb") as fp:
+            fp.write(datacube_file.read())
+        raw_data = rb.parse_ch(path)
+    finally:
+        os.unlink(path)
     if ".CH" in os.path.basename(datacube_file_name):
         datacubes = {
             "Time": [time * 60 for time in raw_data.xlabels],
