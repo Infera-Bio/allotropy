@@ -45,10 +45,7 @@ class ThermoFisherGenesysOnBoardParser(VendorParser[Data, Model]):
             if not lines:
                 return False
             first = lines[0].lower().strip()
-            if first.startswith("sample name") or first.startswith("well position"):
-                return True
-            # Scan/kinetic format: second line starts with "nm,"
-            if len(lines) > 1 and lines[1].strip().startswith("nm,"):
+            if first.startswith("well position"):
                 return True
             return False
         except Exception:
