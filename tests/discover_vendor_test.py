@@ -1,3 +1,4 @@
+import codecs
 import io
 from pathlib import Path
 
@@ -152,3 +153,47 @@ def test_a_vendor_with_no_sniffer_is_still_tried(
     # Every other candidate's own sniffer rejects this content, so only the vendor
     # with no sniffer is left to try, and its (patched) parse succeeds.
     assert discover_vendor(contents) == vendor
+
+
+# Exports in an encoding their parser supports. A sniffer that rejected them for the
+# byte-order mark alone would now keep the vendor out of discovery entirely.
+REENCODED = [
+    (
+        "agilent_gen5/testdata/Synergy instrument datafile (Fibrillation data) - TXT format.txt",
+        "utf-16",
+        Vendor.AGILENT_GEN5,
+    ),
+    (
+        "thermo_fisher_genesys30/testdata/thermo_fisher_genesys30_example_02.csv",
+        "utf-8-sig",
+        Vendor.THERMO_FISHER_GENESYS30,
+    ),
+    (
+        "moldev_softmax_pro/testdata/ACSINS_absorbance_timeformat_spectrum.txt",
+        "utf-8-sig",
+        Vendor.MOLDEV_SOFTMAX_PRO,
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "codec", "expected"), REENCODED)
+def test_an_export_with_a_byte_order_mark_is_still_detected(
+    relative: str, codec: str, expected: Vendor
+) -> None:
+    path = TESTS_DIR / relative
+    raw = path.read_bytes()
+    # The fixtures are in their own encodings: UTF-16 with a mark, or Windows-1252.
+    text = (
+        raw.decode("utf-16")
+        if raw.startswith(codecs.BOM_UTF16_LE)
+        else raw.decode("cp1252")
+    )
+    result = vendor_from_io(io.BytesIO(text.encode(codec)), path.name)
+    assert result in INDISTINGUISHABLE.get(expected, {expected})
+
+
+def test_a_unicorn_archive_with_trailing_bytes_is_still_detected() -> None:
+    # The reader repairs this (fix_zip); the sniffer must apply the same repair.
+    path = TESTS_DIR / "cytiva_unicorn" / "testdata" / "unicorn_1.zip"
+    content = path.read_bytes() + b"\x00" * 65536
+    assert vendor_from_io(io.BytesIO(content), path.name) == Vendor.CYTIVA_UNICORN

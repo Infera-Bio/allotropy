@@ -11,6 +11,7 @@ from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._202
 from allotropy.named_file_contents import NamedFileContents
 from allotropy.parsers.cytiva_unicorn.constants import DISPLAY_NAME
 from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
+    fix_zip,
     UnicornZipHandler,
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurement_group import (
@@ -34,7 +35,8 @@ class CytivaUnicornParser(VendorParser[Data, Model]):
     def sniff(cls, named_file_contents: NamedFileContents) -> bool:
         try:
             named_file_contents.contents.seek(0)
-            with zipfile.ZipFile(named_file_contents.get_bytes_stream()) as zf:
+            # The same repair the reader applies (trailing bytes after the archive).
+            with zipfile.ZipFile(fix_zip(named_file_contents.get_bytes_stream())) as zf:
                 names = zf.namelist()
             # A result export is a zip of zips, or (exported as a folder) holds the
             # result document and system data directly, the two members the reader

@@ -1,6 +1,8 @@
+import codecs
 from collections import defaultdict
 from datetime import tzinfo
 from enum import Enum
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -313,17 +315,55 @@ def _has_own_sniff(parser_cls: type[VendorParser[Any, Any]]) -> bool:
     return parser_cls.sniff.__func__ is not VendorParser.sniff.__func__  # type: ignore[attr-defined]
 
 
+_BOMS = (
+    (codecs.BOM_UTF8, "utf-8-sig"),
+    (codecs.BOM_UTF32_LE, "utf-32"),
+    (codecs.BOM_UTF32_BE, "utf-32"),
+    (codecs.BOM_UTF16_LE, "utf-16"),
+    (codecs.BOM_UTF16_BE, "utf-16"),
+)
+
+
+def _sniff_view(named_file_contents: NamedFileContents) -> NamedFileContents:
+    """The contents sniffers read: a text file that starts with a byte-order mark is
+    handed over as UTF-8 without the mark, so a sniffer that decodes UTF-8 sees the same
+    text the parser will read. A rejecting sniffer keeps a vendor out of the try-parse,
+    so it must not reject an export only because of its encoding. Anything else (no
+    mark, a binary format, a text stream) is handed over unchanged."""
+    contents = named_file_contents.contents
+    contents.seek(0)
+    head = contents.read(4)
+    contents.seek(0)
+    if not isinstance(head, bytes):
+        return named_file_contents
+    for bom, codec in _BOMS:
+        if head.startswith(bom):
+            try:
+                text = contents.read().decode(codec)
+            except UnicodeDecodeError:
+                return named_file_contents
+            finally:
+                contents.seek(0)
+            return NamedFileContents(
+                BytesIO(text.encode("utf-8")),
+                named_file_contents.original_file_path,
+                "utf-8",
+            )
+    return named_file_contents
+
+
 def discover_vendor(named_file_contents: NamedFileContents) -> Vendor:
     extension = named_file_contents.extension
     candidates = [v for v in Vendor if extension in v.supported_extensions]
+    sniff_view = _sniff_view(named_file_contents)
     # Pass 1: collect all sniff matches, and the vendors whose own sniffer said no.
     sniffed: list[Vendor] = []
     rejected: set[Vendor] = set()
     for vendor in candidates:
         parser_cls = _VENDOR_TO_PARSER[vendor]
-        named_file_contents.contents.seek(0)
+        sniff_view.contents.seek(0)
         try:
-            if parser_cls.sniff(named_file_contents):
+            if parser_cls.sniff(sniff_view):
                 sniffed.append(vendor)
             elif _has_own_sniff(parser_cls):
                 rejected.add(vendor)
