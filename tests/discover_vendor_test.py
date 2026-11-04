@@ -197,3 +197,33 @@ def test_a_unicorn_archive_with_trailing_bytes_is_still_detected() -> None:
     path = TESTS_DIR / "cytiva_unicorn" / "testdata" / "unicorn_1.zip"
     content = path.read_bytes() + b"\x00" * 65536
     assert vendor_from_io(io.BytesIO(content), path.name) == Vendor.CYTIVA_UNICORN
+
+
+UTF16_XML = [
+    (
+        "agilent_tapestation_analysis/testdata/agilent_tapestation_analysis_example_01.xml",
+        Vendor.AGILENT_TAPESTATION_ANALYSIS,
+    ),
+    (
+        "bd_biosciences_facsdiva/testdata/facsdiva_example_1.xml",
+        Vendor.BD_BIOSCIENCES_FACSDIVA,
+    ),
+    (
+        "biorad_bioplex_manager/testdata/bio-rad_bio-plex_manager_example_01.xml",
+        Vendor.BIORAD_BIOPLEX,
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "expected"), UTF16_XML)
+def test_a_utf16_xml_export_is_still_detected(relative: str, expected: Vendor) -> None:
+    # An XML sniffer honours the declared encoding, so it must see the original bytes,
+    # not a UTF-8 copy that still declares UTF-16.
+    path = TESTS_DIR / relative
+    text = path.read_bytes().decode("utf-8-sig")
+    text = text.replace('encoding="utf-8"', 'encoding="UTF-16"', 1)
+    text = text.replace('encoding="UTF-8"', 'encoding="UTF-16"', 1)
+    text = text.replace("encoding='UTF-8'", "encoding='UTF-16'", 1)
+    assert "UTF-16" in text.splitlines()[0]
+    result = vendor_from_io(io.BytesIO(text.encode("utf-16")), path.name)
+    assert result == expected

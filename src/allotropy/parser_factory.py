@@ -324,51 +324,67 @@ _BOMS = (
 )
 
 
-def _sniff_view(named_file_contents: NamedFileContents) -> NamedFileContents:
-    """The contents sniffers read: a text file that starts with a byte-order mark is
-    handed over as UTF-8 without the mark, so a sniffer that decodes UTF-8 sees the same
-    text the parser will read. A rejecting sniffer keeps a vendor out of the try-parse,
-    so it must not reject an export only because of its encoding. Anything else (no
-    mark, a binary format, a text stream) is handed over unchanged."""
+def _sniff_views(named_file_contents: NamedFileContents) -> list[NamedFileContents]:
+    """What sniffers are shown: the file as it is and, for text that starts with a
+    byte-order mark, a UTF-8 copy without the mark. Some sniffers decode UTF-8 by hand
+    and only accept the copy; others (an XML sniffer honouring its declared encoding)
+    only accept the original. A sniffer matches if it accepts either, and rejects only
+    if it says no to both, so it never rejects an export for its encoding alone."""
     contents = named_file_contents.contents
     contents.seek(0)
     head = contents.read(4)
     contents.seek(0)
     if not isinstance(head, bytes):
-        return named_file_contents
+        return [named_file_contents]
     for bom, codec in _BOMS:
         if head.startswith(bom):
             try:
                 text = contents.read().decode(codec)
             except UnicodeDecodeError:
-                return named_file_contents
+                return [named_file_contents]
             finally:
                 contents.seek(0)
-            return NamedFileContents(
+            copy = NamedFileContents(
                 BytesIO(text.encode("utf-8")),
                 named_file_contents.original_file_path,
                 "utf-8",
             )
-    return named_file_contents
+            return [named_file_contents, copy]
+    return [named_file_contents]
+
+
+def _sniff(
+    parser_cls: type[VendorParser[Any, Any]], views: list[NamedFileContents]
+) -> bool | None:
+    """True if the sniffer accepts any view, False if it ran and said no to every view,
+    None if it raised on a view it did not accept (nothing proven)."""
+    proven = True
+    for view in views:
+        view.contents.seek(0)
+        try:
+            if parser_cls.sniff(view):
+                return True
+        except Exception:
+            proven = False
+    named_contents = views[0]
+    named_contents.contents.seek(0)
+    return False if proven else None
 
 
 def discover_vendor(named_file_contents: NamedFileContents) -> Vendor:
     extension = named_file_contents.extension
     candidates = [v for v in Vendor if extension in v.supported_extensions]
-    sniff_view = _sniff_view(named_file_contents)
+    views = _sniff_views(named_file_contents)
     # Pass 1: collect all sniff matches, and the vendors whose own sniffer said no.
     sniffed: list[Vendor] = []
     rejected: set[Vendor] = set()
     for vendor in candidates:
         parser_cls = _VENDOR_TO_PARSER[vendor]
-        sniff_view.contents.seek(0)
-        try:
-            if parser_cls.sniff(sniff_view):
-                sniffed.append(vendor)
-            elif _has_own_sniff(parser_cls):
-                rejected.add(vendor)
-        except Exception:  # noqa: S112
-            continue
+        verdict = _sniff(parser_cls, views)
+        if verdict:
+            sniffed.append(vendor)
+        elif verdict is False and _has_own_sniff(parser_cls):
+            rejected.add(vendor)
     # Exactly one sniff match — return without try-parse.
     if len(sniffed) == 1:
         return sniffed[0]
