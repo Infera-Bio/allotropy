@@ -307,25 +307,38 @@ _VENDOR_TO_PARSER: dict[Vendor, type[VendorParser[Any, Any]]] = {
 }
 
 
+def _has_own_sniff(parser_cls: type[VendorParser[Any, Any]]) -> bool:
+    """True when the parser defines its own sniffer rather than inheriting the default,
+    which says False for every file and so proves nothing."""
+    return parser_cls.sniff.__func__ is not VendorParser.sniff.__func__  # type: ignore[attr-defined]
+
+
 def discover_vendor(named_file_contents: NamedFileContents) -> Vendor:
     extension = named_file_contents.extension
     candidates = [v for v in Vendor if extension in v.supported_extensions]
-    # Pass 1: collect all sniff matches.
+    # Pass 1: collect all sniff matches, and the vendors whose own sniffer said no.
     sniffed: list[Vendor] = []
+    rejected: set[Vendor] = set()
     for vendor in candidates:
         parser_cls = _VENDOR_TO_PARSER[vendor]
         named_file_contents.contents.seek(0)
         try:
             if parser_cls.sniff(named_file_contents):
                 sniffed.append(vendor)
+            elif _has_own_sniff(parser_cls):
+                rejected.add(vendor)
         except Exception:  # noqa: S112
             continue
     # Exactly one sniff match — return without try-parse.
     if len(sniffed) == 1:
         return sniffed[0]
     # Pass 2: multiple sniff matches — try parsing to disambiguate.
-    # No sniff matches — try parsing all candidates as fallback.
-    try_parse = sniffed or candidates
+    # No sniff matches — try parsing the candidates no sniffer rejected. A lenient
+    # parser can build data from a file that is no export of its vendor (a plain
+    # two-column CSV passes the Qiacuity dPCR parser), so a vendor whose own sniffer
+    # said no is never chosen by a try-parse. A vendor with no sniffer of its own, or
+    # whose sniffer raised, is still tried: nothing proved the file is not its.
+    try_parse = sniffed or [v for v in candidates if v not in rejected]
     for vendor in try_parse:
         named_file_contents.contents.seek(0)
         try:

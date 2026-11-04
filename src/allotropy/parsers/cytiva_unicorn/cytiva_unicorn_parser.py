@@ -1,3 +1,4 @@
+import re
 import zipfile
 
 from allotropy.allotrope.models.adm.liquid_chromatography.benchling._2023._09.liquid_chromatography import (
@@ -34,7 +35,14 @@ class CytivaUnicornParser(VendorParser[Data, Model]):
         try:
             named_file_contents.contents.seek(0)
             with zipfile.ZipFile(named_file_contents.get_bytes_stream()) as zf:
-                return any(name.endswith(".zip") for name in zf.namelist())
+                names = zf.namelist()
+            # A result export is a zip of zips, or (exported as a folder) holds the
+            # result document and system data directly, the two members the reader
+            # opens first.
+            return any(name.endswith(".zip") for name in names) or (
+                any(re.search(r"Result\.xml$", name) for name in names)
+                and any(re.search(r"SystemData(\.zip)?$", name) for name in names)
+            )
         except Exception:
             return False
 

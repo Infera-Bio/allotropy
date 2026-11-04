@@ -1,9 +1,13 @@
+import io
 from pathlib import Path
 
 import pytest
 
-from allotropy.parser_factory import Vendor
-from allotropy.to_allotrope import vendor_from_file
+from allotropy.exceptions import AllotropeVendorNotFoundError
+from allotropy.named_file_contents import NamedFileContents
+from allotropy.parser_factory import _VENDOR_TO_PARSER, discover_vendor, Vendor
+from allotropy.parsers.vendor_parser import VendorParser
+from allotropy.to_allotrope import vendor_from_file, vendor_from_io
 
 TESTS_DIR = Path(__file__).parent / "parsers"
 
@@ -109,3 +113,42 @@ def test_discover_vendor(
         assert (
             result == expected_vendor
         ), f"For {test_id}: expected {expected_vendor}, got {result}"
+
+
+# Plain tables no sniffer accepts. Before the try-parse excluded vendors whose own
+# sniffer said no, lenient parsers claimed each one (Qiacuity dPCR, CFX Maestro).
+PLAIN_TABLES = {
+    "two_columns": b"a,b\n1,2\n",
+    "well_plate_od": b"Well,Plate,OD 450\nA1,P1,0.5\nA2,P1,0.7\n",
+    "well_metric_value": b"well,metric,value\nA1,signal,5\n",
+    "sample_concentration": b"sample,conc\nS1,12.5\n",
+}
+
+
+@pytest.mark.parametrize("content", PLAIN_TABLES.values(), ids=PLAIN_TABLES.keys())
+def test_a_plain_table_is_not_claimed_by_a_try_parse(content: bytes) -> None:
+    with pytest.raises(AllotropeVendorNotFoundError):
+        vendor_from_io(io.BytesIO(content), "table.csv")
+
+
+def test_a_vendor_with_no_sniffer_is_still_tried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Nothing proved the file is not its export, so the try-parse still reaches it.
+    no_sniffer = [
+        vendor
+        for vendor, parser in _VENDOR_TO_PARSER.items()
+        if parser.sniff.__func__ is VendorParser.sniff.__func__  # type: ignore[attr-defined]
+    ]
+    assert no_sniffer, "every parser has a sniffer; this test has nothing to check"
+    vendor = no_sniffer[0]
+    monkeypatch.setattr(
+        type(vendor.get_parser()), "create_data", lambda _self, _contents: object()
+    )
+    extension = vendor.supported_extensions[0]
+    contents = NamedFileContents(
+        io.BytesIO(b"no sniffer matches this"), f"x.{extension}"
+    )
+    # Every other candidate's own sniffer rejects this content, so only the vendor
+    # with no sniffer is left to try, and its (patched) parse succeeds.
+    assert discover_vendor(contents) == vendor
