@@ -2,7 +2,7 @@ import codecs
 from contextlib import nullcontext
 from datetime import tzinfo
 import hashlib
-from io import BytesIO
+from io import BytesIO, StringIO
 import os
 from typing import Any
 
@@ -18,6 +18,14 @@ from allotropy.types import IOType
 VendorType = Vendor | str
 
 _CHUNK_SIZE = 1 << 20
+
+
+def _seekable(contents: IOType) -> IOType:
+    """The contents, read into memory once when they cannot be read twice in place."""
+    if contents.seekable():
+        return contents
+    data = contents.read()
+    return StringIO(data) if isinstance(data, str) else BytesIO(data)
 
 
 def _default_encoding(contents: IOType, encoding: str | None) -> str | None:
@@ -86,6 +94,7 @@ def allotrope_model_from_io(
 ) -> Any:
     """With deterministic_ids, every identifier in the document derives from the file's
     bytes, so one file always converts to the same document."""
+    contents = _seekable(contents)
     ids = content_derived_ids(_sha256(contents)) if deterministic_ids else nullcontext()
     named_file_contents = NamedFileContents(
         contents, filepath, _default_encoding(contents, encoding)
@@ -167,6 +176,7 @@ def vendor_from_file(filepath: str, encoding: str | None = None) -> Vendor:
 def vendor_from_io(
     contents: IOType, filepath: str, encoding: str | None = None
 ) -> Vendor:
+    contents = _seekable(contents)
     named_file_contents = NamedFileContents(
         contents, filepath, _default_encoding(contents, encoding)
     )
