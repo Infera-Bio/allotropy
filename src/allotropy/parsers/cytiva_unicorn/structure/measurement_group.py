@@ -1,13 +1,14 @@
-from dataclasses import replace
 import re
 from typing import Any
 
 from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._2023._09.liquid_chromatography import (
+    DeviceControlDoc,
     Fraction,
     Log,
+    Measurement,
     MeasurementGroup,
 )
-from allotropy.exceptions import AllotropeConversionError
+from allotropy.parsers.cytiva_unicorn.constants import DEVICE_TYPE
 from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
     UnicornZipHandler,
 )
@@ -57,36 +58,10 @@ from allotropy.parsers.utils.strict_xml_element import (
 def create_measurement_groups(
     handler: UnicornZipHandler, results: StrictXmlElement
 ) -> list[MeasurementGroup]:
-    """One group per chromatogram that holds a curve. A chromatogram whose every curve
-    could not be converted has no measurement for the schema to hold, so it is listed,
-    with each curve's reason, on the first group that has one."""
-    groups = [
+    return [
         create_measurement_group(handler, results, chromatogram)
         for chromatogram in handler.get_chromatograms()
     ]
-    kept = [group for group in groups if group.measurements]
-    dropped = [
-        f"chromatogram {position}: "
-        + str(
-            (group.measurement_aggregate_custom_info or {}).get("curves not converted")
-            or "no curve recorded points"
-        )
-        for position, group in enumerate(groups, start=1)
-        if not group.measurements
-    ]
-    if not kept:
-        msg = "No chromatogram in this result holds a curve that could be converted: "
-        raise AllotropeConversionError(msg + "; ".join(dropped))
-    if dropped:
-        first = kept[0]
-        kept[0] = replace(
-            first,
-            measurement_aggregate_custom_info={
-                **(first.measurement_aggregate_custom_info or {}),
-                "chromatograms not converted": " | ".join(dropped),
-            },
-        )
-    return kept
 
 
 def create_measurement_group(
@@ -127,8 +102,28 @@ def create_measurement_group(
         }
     )
 
+    kept: list[Measurement] = [m for m in measurements if m]
+    if not kept:
+        # The schema needs one measurement per chromatogram. Without a curve to hold, it
+        # carries the run's description and why no curve was converted, so the
+        # chromatogram's logbook and fractions stay with it.
+        kept = [
+            UnicornMeasurement.get_measurement(
+                static_docs=static_docs,
+                device_control_docs=[
+                    DeviceControlDoc(
+                        device_type=DEVICE_TYPE,
+                        start_time=static_docs.start_time,
+                        device_control_custom_info={
+                            "curves not converted": "; ".join(unconverted)
+                            or "no curve recorded points"
+                        },
+                    )
+                ],
+            )
+        ]
     return MeasurementGroup(
-        measurements=[measurement for measurement in measurements if measurement],
+        measurements=kept,
         fractions=create_fractions(event_curves) if event_curves else None,
         logs=create_logs(event_curves) if event_curves else None,
         measurement_aggregate_custom_info={

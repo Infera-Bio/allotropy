@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import struct
+from typing import Any
 import zipfile
 
 import pytest
@@ -204,31 +205,45 @@ def damaged(prefixes: tuple[str, ...]) -> bytes:
     return out.getvalue()
 
 
-def test_a_chromatogram_with_no_convertible_curve_is_listed_not_fatal() -> None:
+def _documents(content: bytes) -> list[dict[str, Any]]:
     from allotropy.parser_factory import Vendor
     from allotropy.to_allotrope import allotrope_from_io
 
-    asm = allotrope_from_io(
-        io.BytesIO(damaged(("Chrom.1_",))), "export.zip", Vendor.CYTIVA_UNICORN
-    )
-    documents = asm["liquid chromatography aggregate document"][
+    asm = allotrope_from_io(io.BytesIO(content), "export.zip", Vendor.CYTIVA_UNICORN)
+    documents: list[dict[str, Any]] = asm["liquid chromatography aggregate document"][
         "liquid chromatography document"
     ]
-    assert len(documents) == 1
-    notes = documents[0]["measurement aggregate document"][
-        "custom information document"
-    ]["chromatograms not converted"]
-    assert notes.startswith("chromatogram 1: ")
-    assert "with no amplitudes" in notes
+    return documents
 
 
-def test_a_result_with_no_convertible_curve_says_why() -> None:
-    from allotropy.parser_factory import Vendor
-    from allotropy.to_allotrope import allotrope_from_io
+def _reasons(document: dict[str, Any]) -> list[str]:
+    return [
+        control["custom information document"]["curves not converted"]
+        for measurement in document["measurement aggregate document"][
+            "measurement document"
+        ]
+        for control in measurement["device control aggregate document"][
+            "device control document"
+        ]
+        if "curves not converted" in control.get("custom information document", {})
+    ]
 
-    with pytest.raises(AllotropeConversionError, match="with no amplitudes"):
-        allotrope_from_io(
-            io.BytesIO(damaged(("Chrom.1_", "Column Performance Test_"))),
-            "export.zip",
-            Vendor.CYTIVA_UNICORN,
-        )
+
+def test_a_chromatogram_with_no_convertible_curve_keeps_its_events() -> None:
+    before = _documents(open(MULTIPLE, "rb").read())
+    after = _documents(damaged(("Chrom.1_",)))
+    assert len(after) == len(before) == 2
+    damaged_doc, intact = after
+    [reason] = _reasons(damaged_doc)
+    assert "with no amplitudes" in reason
+    assert _reasons(intact) == []
+    for key in ("fraction aggregate document", "log aggregate document"):
+        assert damaged_doc["measurement aggregate document"].get(key) == before[0][
+            "measurement aggregate document"
+        ].get(key)
+
+
+def test_a_result_with_no_convertible_curve_still_converts_and_says_why() -> None:
+    documents = _documents(damaged(("Chrom.1_", "Column Performance Test_")))
+    assert len(documents) == 2
+    assert all(len(_reasons(document)) == 1 for document in documents)
