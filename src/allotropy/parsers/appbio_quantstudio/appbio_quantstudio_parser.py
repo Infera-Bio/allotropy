@@ -33,24 +33,31 @@ class AppBioQuantStudioParser(VendorParser[Data, Model]):
     SUPPORTED_EXTENSIONS = AppBioQuantStudioReader.SUPPORTED_EXTENSIONS
     SUPPORTED_DETECTION_MODES = "Fluorescence"
     SCHEMA_MAPPER = Mapper
+    _REQUIRED_HEADER_KEYS = frozenset(
+        {"Experiment Name", "Experiment Type", "Instrument Type"}
+    )
 
     @classmethod
     def sniff(cls, named_file_contents: NamedFileContents) -> bool:
         try:
             if named_file_contents.extension == "txt":
                 named_file_contents.contents.seek(0)
-                raw = named_file_contents.contents.read(8192)
+                raw = named_file_contents.contents.read(65536)
                 text = (
                     raw.decode("utf-8", errors="replace")
                     if isinstance(raw, bytes)
                     else raw
                 )
-                lines = text.splitlines()
-                has_star_keys = any(
-                    line.startswith("* ") and " = " in line for line in lines[:10]
-                )
-                has_brackets = any(line.startswith("[") for line in lines)
-                return has_star_keys or has_brackets
+                # The header is the "* Key = Value" block before the first
+                # "[Section]". Header.create cannot build without these keys, so
+                # a text file whose header lacks them is not a QuantStudio export.
+                header_keys: set[str] = set()
+                for line in text.splitlines():
+                    if line.startswith("["):
+                        break
+                    if line.startswith("*") and "=" in line:
+                        header_keys.add(line[1:].split("=", 1)[0].strip())
+                return cls._REQUIRED_HEADER_KEYS <= header_keys
             # xlsx: QuantStudio XLSX files have sheet names wrapped in brackets
             wb = openpyxl.load_workbook(
                 named_file_contents.get_bytes_stream(), read_only=True

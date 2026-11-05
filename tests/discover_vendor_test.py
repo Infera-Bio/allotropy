@@ -227,3 +227,52 @@ def test_a_utf16_xml_export_is_still_detected(relative: str, expected: Vendor) -
     assert "UTF-16" in text.splitlines()[0]
     result = vendor_from_io(io.BytesIO(text.encode("utf-16")), path.name)
     assert result == expected
+
+
+# Text shaped like another instrument's export. Each once passed a sniffer that keyed
+# on one generic trait (a "[Section]" line, a "Plate ID" column) and then failed the
+# parse with a message asking for a re-export from the wrong software.
+FOREIGN_TEXT = [
+    (
+        Vendor.APPBIO_QUANTSTUDIO,
+        b"[Header]\r\nApplication Name\tLabSolutions\r\nVersion\t5.54\r\n\r\n"
+        b"[File Information]\r\nType\tData File\r\n",
+    ),
+    (
+        Vendor.APPBIO_QUANTSTUDIO,
+        b"* Block Type = 96-Well Block\r\n\r\n[Results]\r\nWell\tCT\r\n1\t20.1\r\n",
+    ),
+    (
+        Vendor.THERMO_FISHER_NANODROP_8000,
+        b"Type\tSample Name\tSizes[1] (d.nm)\tPlate ID\r\nSize\tS 1\t0.4\t\r\n",
+    ),
+    (
+        Vendor.THERMO_FISHER_NANODROP_8000,
+        b"Plate ID\tSample ID\tConc.\r\nP1\tS1\t12.5\r\n",
+    ),
+]
+
+
+@pytest.mark.parametrize(("vendor", "content"), FOREIGN_TEXT)
+def test_a_sniffer_rejects_text_missing_its_required_header(
+    vendor: Vendor, content: bytes
+) -> None:
+    contents = NamedFileContents(io.BytesIO(content), "export.txt")
+    assert not vendor.get_parser().sniff(contents)
+
+
+@pytest.mark.parametrize(
+    ("vendor", "directory"),
+    [
+        (Vendor.APPBIO_QUANTSTUDIO, "appbio_quantstudio"),
+        (Vendor.THERMO_FISHER_NANODROP_8000, "thermo_fisher_nanodrop_8000"),
+    ],
+)
+def test_a_sniffer_accepts_every_export_of_its_own(
+    vendor: Vendor, directory: str
+) -> None:
+    exports = sorted((TESTS_DIR / directory / "testdata").glob("*.txt"))
+    assert exports
+    for path in exports:
+        contents = NamedFileContents(io.BytesIO(path.read_bytes()), path.name)
+        assert vendor.get_parser().sniff(contents), path.name

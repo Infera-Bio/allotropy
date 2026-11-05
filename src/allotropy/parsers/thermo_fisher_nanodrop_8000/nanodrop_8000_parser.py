@@ -25,6 +25,7 @@ class Nanodrop8000Parser(VendorParser[Data, Model]):
     SUPPORTED_EXTENSIONS = Nanodrop8000Reader.SUPPORTED_EXTENSIONS
     SUPPORTED_DETECTION_MODES = "Absorbance"
     SCHEMA_MAPPER = Mapper
+    _REQUIRED_COLUMNS = frozenset({"plate id", "well", "date"})
 
     @classmethod
     def sniff(cls, named_file_contents: NamedFileContents) -> bool:
@@ -33,12 +34,11 @@ class Nanodrop8000Parser(VendorParser[Data, Model]):
             text = (
                 raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
             )
-            lines = text.splitlines()
-            for line in lines[:5]:
-                fields = line.split("\t")
-                if len(fields) > 1 and any(
-                    f.strip().lower() == "plate id" for f in fields
-                ):
+            # Every row reads "well" and "date" unconditionally, and the export
+            # always names its plate, so the header must carry all three.
+            for line in text.splitlines()[:5]:
+                fields = {f.strip().lower() for f in line.split("\t")}
+                if cls._REQUIRED_COLUMNS <= fields:
                     return True
             return False
         except Exception:
