@@ -1,3 +1,4 @@
+from dataclasses import replace
 import re
 from typing import Any
 
@@ -6,6 +7,7 @@ from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._202
     Log,
     MeasurementGroup,
 )
+from allotropy.exceptions import AllotropeConversionError
 from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
     UnicornZipHandler,
 )
@@ -55,10 +57,36 @@ from allotropy.parsers.utils.strict_xml_element import (
 def create_measurement_groups(
     handler: UnicornZipHandler, results: StrictXmlElement
 ) -> list[MeasurementGroup]:
-    return [
+    """One group per chromatogram that holds a curve. A chromatogram whose every curve
+    could not be converted has no measurement for the schema to hold, so it is listed,
+    with each curve's reason, on the first group that has one."""
+    groups = [
         create_measurement_group(handler, results, chromatogram)
         for chromatogram in handler.get_chromatograms()
     ]
+    kept = [group for group in groups if group.measurements]
+    dropped = [
+        f"chromatogram {position}: "
+        + str(
+            (group.measurement_aggregate_custom_info or {}).get("curves not converted")
+            or "no curve recorded points"
+        )
+        for position, group in enumerate(groups, start=1)
+        if not group.measurements
+    ]
+    if not kept:
+        msg = "No chromatogram in this result holds a curve that could be converted: "
+        raise AllotropeConversionError(msg + "; ".join(dropped))
+    if dropped:
+        first = kept[0]
+        kept[0] = replace(
+            first,
+            measurement_aggregate_custom_info={
+                **(first.measurement_aggregate_custom_info or {}),
+                "chromatograms not converted": " | ".join(dropped),
+            },
+        )
+    return kept
 
 
 def create_measurement_group(

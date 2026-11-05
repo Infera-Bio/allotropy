@@ -176,3 +176,59 @@ def test_a_parsed_setting_never_replaces_an_element_of_the_same_name() -> None:
         "instruction": "System flow",
         "logbook setting": {"value": 5.0, "unit": "ml/min"},
     }
+
+
+MULTIPLE = "tests/parsers/cytiva_unicorn/testdata/unicorn_multiple_chromatograms.zip"
+
+
+def damaged(prefixes: tuple[str, ...]) -> bytes:
+    """The two-chromatogram fixture with every curve of the named chromatograms holding
+    an axis but no amplitudes."""
+    out = io.BytesIO()
+    with zipfile.ZipFile(MULTIPLE) as src, zipfile.ZipFile(out, "w") as dst:
+        for info in src.infolist():
+            data = src.read(info)
+            if info.filename.startswith(prefixes) and info.filename.endswith("_True"):
+                inner_out = io.BytesIO()
+                with (
+                    zipfile.ZipFile(io.BytesIO(data)) as inner,
+                    zipfile.ZipFile(inner_out, "w") as rebuilt,
+                ):
+                    for member in inner.infolist():
+                        body = inner.read(member)
+                        if member.filename == "CoordinateData.Amplitudes":
+                            body = array([])
+                        rebuilt.writestr(member.filename, body)
+                data = inner_out.getvalue()
+            dst.writestr(info.filename, data)
+    return out.getvalue()
+
+
+def test_a_chromatogram_with_no_convertible_curve_is_listed_not_fatal() -> None:
+    from allotropy.parser_factory import Vendor
+    from allotropy.to_allotrope import allotrope_from_io
+
+    asm = allotrope_from_io(
+        io.BytesIO(damaged(("Chrom.1_",))), "export.zip", Vendor.CYTIVA_UNICORN
+    )
+    documents = asm["liquid chromatography aggregate document"][
+        "liquid chromatography document"
+    ]
+    assert len(documents) == 1
+    notes = documents[0]["measurement aggregate document"][
+        "custom information document"
+    ]["chromatograms not converted"]
+    assert notes.startswith("chromatogram 1: ")
+    assert "with no amplitudes" in notes
+
+
+def test_a_result_with_no_convertible_curve_says_why() -> None:
+    from allotropy.parser_factory import Vendor
+    from allotropy.to_allotrope import allotrope_from_io
+
+    with pytest.raises(AllotropeConversionError, match="with no amplitudes"):
+        allotrope_from_io(
+            io.BytesIO(damaged(("Chrom.1_", "Column Performance Test_"))),
+            "export.zip",
+            Vendor.CYTIVA_UNICORN,
+        )
