@@ -1,3 +1,4 @@
+import csv
 import re
 
 import openpyxl
@@ -45,22 +46,28 @@ class AppBioQuantStudioParser(VendorParser[Data, Model]):
             if named_file_contents.extension == "txt":
                 named_file_contents.contents.seek(0)
                 raw = named_file_contents.contents.read()
-                text = (
-                    raw.decode("utf-8", errors="replace")
-                    if isinstance(raw, bytes)
-                    else raw
-                )
                 # The header is the "* Key = Value" block before the first
-                # "[Section]", read the way the TXT reader reads it. Header.create
-                # cannot build without these keys, so a text file whose header
-                # lacks them is not a QuantStudio export.
-                header_keys: set[str] = set()
-                for line in text.splitlines():
-                    if re.search(r"^\[.+\]", line):
-                        break
-                    key, sep, _ = line.strip().partition("=")
-                    if sep:
-                        header_keys.add(key.replace("*", "").strip())
+                # "[Section]", read the way the TXT reader reads it: stripped lines
+                # split on "=" with CSV quoting, "*" removed from the key.
+                # Header.create cannot build without these keys, so a text file
+                # whose header lacks them is not a QuantStudio export. Only the
+                # header is decoded and split, however large the file.
+                if isinstance(raw, bytes):
+                    end = re.search(rb"^\[.+\]", raw, re.MULTILINE)
+                    header = raw[: end.start() if end else len(raw)].decode(
+                        "utf-8", errors="replace"
+                    )
+                else:
+                    end_str = re.search(r"^\[.+\]", raw, re.MULTILINE)
+                    header = raw[: end_str.start() if end_str else len(raw)]
+                rows = csv.reader(
+                    [line.strip() for line in header.splitlines()],
+                    delimiter="=",
+                    skipinitialspace=True,
+                )
+                header_keys = {
+                    row[0].replace("*", "").strip() for row in rows if len(row) > 1
+                }
                 return cls._REQUIRED_HEADER_KEYS <= header_keys
             # xlsx: QuantStudio XLSX files have sheet names wrapped in brackets
             wb = openpyxl.load_workbook(

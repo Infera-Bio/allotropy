@@ -285,9 +285,10 @@ def _variant(relative: str, old: bytes, new: bytes, count: int = 1) -> bytes:
 
 
 # Exports the readers parse that differ from the test data only in layout: a header
-# longer than any fixed read window, indented header keys, quoted column names.
+# longer than any fixed read window, indented or quoted header keys, quoted column
+# names.
 LAYOUT_VARIANTS = [
-    (
+    pytest.param(
         "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
         _variant(
             "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
@@ -295,8 +296,9 @@ LAYOUT_VARIANTS = [
             b"* Experiment Comment = " + b"x" * 70000,
         ),
         Vendor.APPBIO_QUANTSTUDIO,
+        id="quantstudio_long_header",
     ),
-    (
+    pytest.param(
         "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
         _variant(
             "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
@@ -305,8 +307,19 @@ LAYOUT_VARIANTS = [
             count=-1,
         ),
         Vendor.APPBIO_QUANTSTUDIO,
+        id="quantstudio_indented_keys",
     ),
-    (
+    pytest.param(
+        "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+        _variant(
+            "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+            b"* Experiment Name =",
+            b'"* Experiment Name "=',
+        ),
+        Vendor.APPBIO_QUANTSTUDIO,
+        id="quantstudio_quoted_key",
+    ),
+    pytest.param(
         "thermo_fisher_nanodrop_8000/testdata/Thermo_NanoDrop_8000_example01.txt",
         _variant(
             "thermo_fisher_nanodrop_8000/testdata/Thermo_NanoDrop_8000_example01.txt",
@@ -314,6 +327,7 @@ LAYOUT_VARIANTS = [
             b'\t"Well "\t',
         ).replace(b"\tDate \t", b'\t"Date "\t', 1),
         Vendor.THERMO_FISHER_NANODROP_8000,
+        id="nanodrop_quoted_columns",
     ),
 ]
 
