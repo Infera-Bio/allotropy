@@ -276,3 +276,54 @@ def test_a_sniffer_accepts_every_export_of_its_own(
     for path in exports:
         contents = NamedFileContents(io.BytesIO(path.read_bytes()), path.name)
         assert vendor.get_parser().sniff(contents), path.name
+
+
+def _variant(relative: str, old: bytes, new: bytes, count: int = 1) -> bytes:
+    raw = (TESTS_DIR / relative).read_bytes()
+    assert raw.count(old) >= count, relative
+    return raw.replace(old, new, count)
+
+
+# Exports the readers parse that differ from the test data only in layout: a header
+# longer than any fixed read window, indented header keys, quoted column names.
+LAYOUT_VARIANTS = [
+    (
+        "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+        _variant(
+            "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+            b"* Experiment Comment = 001000000001499830",
+            b"* Experiment Comment = " + b"x" * 70000,
+        ),
+        Vendor.APPBIO_QUANTSTUDIO,
+    ),
+    (
+        "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+        _variant(
+            "appbio_quantstudio/testdata/example_quantsudio_results_only.txt",
+            b"\n* Experiment ",
+            b"\n  * Experiment ",
+            count=-1,
+        ),
+        Vendor.APPBIO_QUANTSTUDIO,
+    ),
+    (
+        "thermo_fisher_nanodrop_8000/testdata/Thermo_NanoDrop_8000_example01.txt",
+        _variant(
+            "thermo_fisher_nanodrop_8000/testdata/Thermo_NanoDrop_8000_example01.txt",
+            b"\tWell \t",
+            b'\t"Well "\t',
+        ).replace(b"\tDate \t", b'\t"Date "\t', 1),
+        Vendor.THERMO_FISHER_NANODROP_8000,
+    ),
+]
+
+
+@pytest.mark.parametrize(("relative", "content", "expected"), LAYOUT_VARIANTS)
+def test_a_parseable_layout_variant_is_still_detected(
+    relative: str, content: bytes, expected: Vendor
+) -> None:
+    contents = NamedFileContents(io.BytesIO(content), Path(relative).name)
+    assert expected.get_parser().sniff(contents)
+    assert vendor_from_io(io.BytesIO(content), Path(relative).name) in (
+        INDISTINGUISHABLE.get(expected, {expected})
+    )

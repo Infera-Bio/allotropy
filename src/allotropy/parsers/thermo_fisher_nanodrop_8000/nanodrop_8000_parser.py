@@ -1,3 +1,5 @@
+import csv
+
 from allotropy.allotrope.models.adm.spectrophotometry.benchling._2023._12.spectrophotometry import (
     Model,
 )
@@ -35,10 +37,10 @@ class Nanodrop8000Parser(VendorParser[Data, Model]):
                 raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else raw
             )
             # Every row reads "well" and "date" unconditionally, and the export
-            # always names its plate, so the header must carry all three.
-            for line in text.splitlines()[:5]:
-                fields = {f.strip().lower() for f in line.split("\t")}
-                if cls._REQUIRED_COLUMNS <= fields:
+            # always names its plate, so the header must carry all three. Fields
+            # are split with the quoting the reader's tab-separated parse honours.
+            for row in csv.reader(text.splitlines()[:5], delimiter="\t"):
+                if cls._REQUIRED_COLUMNS <= {f.strip().lower() for f in row}:
                     return True
             return False
         except Exception:
