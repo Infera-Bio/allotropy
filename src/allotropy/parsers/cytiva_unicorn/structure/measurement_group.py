@@ -1,4 +1,5 @@
 import re
+from typing import Any
 
 from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._2023._09.liquid_chromatography import (
     Fraction,
@@ -18,6 +19,10 @@ from allotropy.parsers.cytiva_unicorn.structure.measurements.concentration impor
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.conductivity import (
     ConductivityMeasurement,
+)
+from allotropy.parsers.cytiva_unicorn.structure.measurements.curve import (
+    CurveMeasurement,
+    data_cube_labels,
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.flow import (
     FlowMeasurement,
@@ -82,6 +87,13 @@ def create_measurement_group(
         FlowMeasurement.create_or_none(handler, elements, static_docs),
         TemperatureMeasurement.create_or_none(handler, elements, static_docs),
     ]
+    # Every other curve the run recorded is kept too, as the file names it.
+    read = data_cube_labels([m for m in measurements if m])
+    measurements += [
+        CurveMeasurement.create_or_none(handler, element, static_docs)
+        for element in elements
+        if element.find("Name").get_text_or_none() not in read
+    ]
     # Some curves may not be read due not matching any supported measurement type, mark these as read.
     for element in elements:
         element.mark_read("attr:CurveDataType")
@@ -139,6 +151,26 @@ def create_fractions(event_curves: StrictXmlElement) -> list[Fraction]:
     return []
 
 
+# A logbook instruction states its value with the unit in braces, the way UNICORN writes
+# it: "System flow 5.000 {ml/min} Pre column pressure (Completed)".
+_SETTING = re.compile(
+    r"^(?P<instruction>.*?\S)\s+(?P<value>[-+]?\d+(?:\.\d+)?)\s*\{(?P<unit>[^{}]+)\}"
+)
+
+
+def instruction_setting(event_text: str) -> dict[str, Any]:
+    """The instruction and the first value it sets, with its unit, as the logbook states
+    them, so a setting can be compared with the curve the system recorded. Text with no
+    value in braces adds nothing."""
+    match = _SETTING.match(event_text)
+    if match is None:
+        return {}
+    return {
+        "instruction": match.group("instruction"),
+        "setting": {"value": float(match.group("value")), "unit": match.group("unit")},
+    }
+
+
 def create_logs(event_curves: StrictXmlElement) -> list[Log]:
     event_curve_logs = None
     for event_curve in event_curves.findall("EventCurve"):
@@ -183,7 +215,10 @@ def create_logs(event_curves: StrictXmlElement) -> list[Log]:
                         else t_min * 60
                     ),
                     retention_volume=event.get_sub_float_or_none("EventVolume"),
-                    custom_info=event.get_unread(),
+                    custom_info={
+                        **instruction_setting(event_text),
+                        **event.get_unread(),
+                    },
                 )
             )
 

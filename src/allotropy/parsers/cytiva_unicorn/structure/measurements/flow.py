@@ -95,11 +95,19 @@ class FlowMeasurement(UnicornMeasurement):
                 start_time=static_docs.start_time,
                 sample_flow_data_cube=cls.get_data_cube_or_none(
                     handler,
-                    cls.filter_curve_or_none(elements, r"^Sample linear flow$"),
+                    linear := cls.filter_curve_or_none(
+                        elements, r"^Sample linear flow$"
+                    ),
                     DataCubeComponent(
                         type_=FieldComponentDatatype.float,
                         concept="sample flow",
-                        unit="cm/s",
+                        # UNICORN records linear flow in cm/h; the curve states its unit.
+                        unit=(
+                            linear.get_sub_text_or_none("AmplitudeUnit")
+                            if linear
+                            else None
+                        )
+                        or "cm/h",
                     ),
                 ),
             ),

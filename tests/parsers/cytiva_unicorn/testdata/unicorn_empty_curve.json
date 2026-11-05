@@ -3,10 +3,10 @@
     "liquid chromatography aggregate document": {
         "data system document": {
             "ASM converter name": "allotropy_cytiva_unicorn",
-            "ASM converter version": "0.1.146",
+            "ASM converter version": "0.1.150",
             "file name": "unicorn_empty_curve.zip",
             "software version": "7.7.0.4016",
-            "UNC path": "tests/parsers/cytiva_unicorn/testdata/unicorn_empty_curve.zip",
+            "UNC path": "tests\\parsers\\cytiva_unicorn\\testdata\\unicorn_empty_curve.zip",
             "custom information document": {
                 "Created": "2025-01-15T10:00:00.000",
                 "CreatedBy": "TestUser",
@@ -423,6 +423,61 @@
                                             -1.0044536076946637e+17,
                                             -3.3307118162369577e+18
                                         ]
+                                    ]
+                                }
+                            }
+                        },
+                        {
+                            "device control aggregate document": {
+                                "device control document": [
+                                    {
+                                        "device type": "HPLC",
+                                        "start time setting": "2025-01-15T10:00:00+00:00",
+                                        "custom information document": {
+                                            "ColumnVolume": "120.0",
+                                            "ScanInterval": "0"
+                                        }
+                                    }
+                                ]
+                            },
+                            "sample document": {
+                                "sample identifier": "N/A",
+                                "batch identifier": "00000000-0000-0000-0000-000000000001"
+                            },
+                            "chromatography column document": {},
+                            "measurement identifier": "CYTIVA_UNICORN_TEST_ID_3",
+                            "injection document": {
+                                "autosampler injection volume setting (chromatography)": {
+                                    "value": -0.0,
+                                    "unit": "mm^3"
+                                },
+                                "injection identifier": "CYTIVA_UNICORN_TEST_ID_0",
+                                "injection time": "2025-01-15T10:00:00+00:00"
+                            },
+                            "chromatogram data cube": {
+                                "label": "pH",
+                                "cube-structure": {
+                                    "dimensions": [
+                                        {
+                                            "@componentDatatype": "float",
+                                            "concept": "retention volume",
+                                            "unit": "mL"
+                                        }
+                                    ],
+                                    "measures": [
+                                        {
+                                            "@componentDatatype": "float",
+                                            "concept": "pH",
+                                            "unit": "pH"
+                                        }
+                                    ]
+                                },
+                                "data": {
+                                    "measures": [
+                                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+                                    ],
+                                    "dimensions": [
+                                        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
                                     ]
                                 }
                             }
