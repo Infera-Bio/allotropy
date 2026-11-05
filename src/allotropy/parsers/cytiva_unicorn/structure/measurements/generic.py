@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from re import search
 from typing import Any
 
@@ -25,6 +26,13 @@ from allotropy.parsers.utils.strict_xml_element import (
     StrictXmlElement,
 )
 from allotropy.parsers.utils.uuids import random_uuid_str
+
+# The curve elements a measurement has turned into a data cube, while one chromatogram is
+# converted, so a curve no named measurement read can be told apart from one it did, even
+# when two curves share a name.
+CONVERTED_CURVES: ContextVar[set[int] | None] = ContextVar(
+    "unicorn_converted_curves", default=None
+)
 
 
 class UnicornMeasurement(Measurement):
@@ -123,11 +131,14 @@ class UnicornMeasurement(Measurement):
                     name,
                     data_cube_component,
                     transformation,
+                    curve,
                 )
-                # Curves with no recorded points (e.g. an unused UV channel)
-                # produce empty arrays, which are invalid in the ASM schema.
-                if not any(data_cube.dimensions):
+                # A curve with no recorded points (e.g. an unused UV channel) has
+                # empty arrays, which are invalid in the ASM schema.
+                if not any(data_cube.dimensions) and not any(data_cube.measures):
                     return None
+                if (converted := CONVERTED_CURVES.get()) is not None:
+                    converted.add(id(curve))
                 return data_cube
         return None
 

@@ -3,10 +3,10 @@
     "liquid chromatography aggregate document": {
         "data system document": {
             "ASM converter name": "allotropy_cytiva_unicorn",
-            "ASM converter version": "0.1.150",
+            "ASM converter version": "0.1.146",
             "file name": "unicorn_empty_curve.zip",
             "software version": "7.7.0.4016",
-            "UNC path": "tests\\parsers\\cytiva_unicorn\\testdata\\unicorn_empty_curve.zip",
+            "UNC path": "tests/parsers/cytiva_unicorn/testdata/unicorn_empty_curve.zip",
             "custom information document": {
                 "Created": "2025-01-15T10:00:00.000",
                 "CreatedBy": "TestUser",

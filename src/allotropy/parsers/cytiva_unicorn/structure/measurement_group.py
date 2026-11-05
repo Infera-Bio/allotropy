@@ -9,6 +9,9 @@ from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._202
 from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
     UnicornZipHandler,
 )
+from allotropy.parsers.cytiva_unicorn.structure.data_cube.creator import (
+    CurveWithoutAxisError,
+)
 from allotropy.parsers.cytiva_unicorn.structure.measurements.absorbance import (
     AbsorbanceMeasurement1,
     AbsorbanceMeasurement2,
@@ -22,10 +25,13 @@ from allotropy.parsers.cytiva_unicorn.structure.measurements.conductivity import
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.curve import (
     CurveMeasurement,
-    data_cube_labels,
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.flow import (
     FlowMeasurement,
+)
+from allotropy.parsers.cytiva_unicorn.structure.measurements.generic import (
+    CONVERTED_CURVES,
+    UnicornMeasurement,
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.ph import (
     PhMeasurement,
@@ -36,7 +42,10 @@ from allotropy.parsers.cytiva_unicorn.structure.measurements.pressure import (
 from allotropy.parsers.cytiva_unicorn.structure.measurements.temperature import (
     TemperatureMeasurement,
 )
-from allotropy.parsers.cytiva_unicorn.structure.peaks import get_peak_tables
+from allotropy.parsers.cytiva_unicorn.structure.peaks import (
+    get_peak_tables,
+    PeakTables,
+)
 from allotropy.parsers.cytiva_unicorn.structure.static_docs import (
     StaticDocs,
 )
@@ -68,32 +77,14 @@ def create_measurement_group(
     static_docs = StaticDocs.create(
         handler, curves.find("Curve"), results, analysis_settings
     )
-    measurements = [
-        AbsorbanceMeasurement1.create_or_none(
-            handler, elements, static_docs, peak_tables
-        ),
-        AbsorbanceMeasurement2.create_or_none(
-            handler, elements, static_docs, peak_tables
-        ),
-        AbsorbanceMeasurement3.create_or_none(
-            handler, elements, static_docs, peak_tables
-        ),
-        ConductivityMeasurement.create_or_none(
-            handler, elements, static_docs, peak_tables
-        ),
-        PhMeasurement.create_or_none(handler, elements, static_docs),
-        ConcentrationMeasurement.create_or_none(handler, elements, static_docs),
-        PressureMeasurement.create_or_none(handler, elements, static_docs),
-        FlowMeasurement.create_or_none(handler, elements, static_docs),
-        TemperatureMeasurement.create_or_none(handler, elements, static_docs),
-    ]
-    # Every other curve the run recorded is kept too, as the file names it.
-    read = data_cube_labels([m for m in measurements if m])
-    measurements += [
-        CurveMeasurement.create_or_none(handler, element, static_docs)
-        for element in elements
-        if element.find("Name").get_text_or_none() not in read
-    ]
+    converted: set[int] = set()
+    token = CONVERTED_CURVES.set(converted)
+    try:
+        measurements, without_axis = _measurements(
+            handler, elements, static_docs, peak_tables, converted
+        )
+    finally:
+        CONVERTED_CURVES.reset(token)
     # Some curves may not be read due not matching any supported measurement type, mark these as read.
     for element in elements:
         element.mark_read("attr:CurveDataType")
@@ -115,9 +106,51 @@ def create_measurement_group(
             "RunIndex": results.get_sub_text_or_none("RunIndex"),
             "RunType": results.get_sub_text_or_none("RunType"),
             "Name": results.get_sub_text_or_none("Name"),
+            "curves without an axis": "; ".join(without_axis) or None,
             **dict(sorted(chromatogram.get_unread().items())),
         },
     )
+
+
+def _measurements(
+    handler: UnicornZipHandler,
+    elements: list[StrictXmlElement],
+    static_docs: StaticDocs,
+    peak_tables: PeakTables,
+    converted: set[int],
+) -> tuple[list[UnicornMeasurement | None], list[str]]:
+    """The named measurements, then one for every other curve the run recorded, as the
+    file names it; and the names of curves that hold amplitudes with no axis."""
+    measurements: list[UnicornMeasurement | None] = [
+        AbsorbanceMeasurement1.create_or_none(
+            handler, elements, static_docs, peak_tables
+        ),
+        AbsorbanceMeasurement2.create_or_none(
+            handler, elements, static_docs, peak_tables
+        ),
+        AbsorbanceMeasurement3.create_or_none(
+            handler, elements, static_docs, peak_tables
+        ),
+        ConductivityMeasurement.create_or_none(
+            handler, elements, static_docs, peak_tables
+        ),
+        PhMeasurement.create_or_none(handler, elements, static_docs),
+        ConcentrationMeasurement.create_or_none(handler, elements, static_docs),
+        PressureMeasurement.create_or_none(handler, elements, static_docs),
+        FlowMeasurement.create_or_none(handler, elements, static_docs),
+        TemperatureMeasurement.create_or_none(handler, elements, static_docs),
+    ]
+    without_axis: list[str] = []
+    for element in elements:
+        if id(element) in converted:
+            continue
+        try:
+            measurements.append(
+                CurveMeasurement.create_or_none(handler, element, static_docs)
+            )
+        except CurveWithoutAxisError:
+            without_axis.append(element.find("Name").get_text_or_none() or "")
+    return measurements, without_axis
 
 
 def create_fractions(event_curves: StrictXmlElement) -> list[Fraction]:
@@ -152,23 +185,28 @@ def create_fractions(event_curves: StrictXmlElement) -> list[Fraction]:
 
 
 # A logbook instruction states its value with the unit in braces, the way UNICORN writes
-# it: "System flow 5.000 {ml/min} Pre column pressure (Completed)".
+# it: "System flow 5.000 {ml/min} Pre column pressure (Completed)". The instruction is the
+# text before the first value, so it never holds an earlier value in braces.
 _SETTING = re.compile(
-    r"^(?P<instruction>.*?\S)\s+(?P<value>[-+]?\d+(?:\.\d+)?)\s*\{(?P<unit>[^{}]+)\}"
+    r"^(?P<instruction>[^{}]*?\S)\s+"
+    r"(?P<value>[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)"
+    r"\s*\{(?P<unit>[^{}]+)\}"
 )
 
 
-def instruction_setting(event_text: str) -> dict[str, Any]:
+def instruction_setting(event_text: str, taken: dict[str, Any]) -> dict[str, Any]:
     """The instruction and the first value it sets, with its unit, as the logbook states
     them, so a setting can be compared with the curve the system recorded. Text with no
-    value in braces adds nothing."""
+    value in braces adds nothing. The keys are prefixed with "logbook" when the event
+    already carries an element of the same name, so neither is lost."""
     match = _SETTING.match(event_text)
     if match is None:
         return {}
-    return {
+    parsed = {
         "instruction": match.group("instruction"),
         "setting": {"value": float(match.group("value")), "unit": match.group("unit")},
     }
+    return {(f"logbook {k}" if k in taken else k): v for k, v in parsed.items()}
 
 
 def create_logs(event_curves: StrictXmlElement) -> list[Log]:
@@ -216,8 +254,8 @@ def create_logs(event_curves: StrictXmlElement) -> list[Log]:
                     ),
                     retention_volume=event.get_sub_float_or_none("EventVolume"),
                     custom_info={
-                        **instruction_setting(event_text),
-                        **event.get_unread(),
+                        **(unread := event.get_unread()),
+                        **instruction_setting(event_text, unread),
                     },
                 )
             )

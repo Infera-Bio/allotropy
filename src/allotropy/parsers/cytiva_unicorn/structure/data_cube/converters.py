@@ -2,6 +2,8 @@ from abc import abstractmethod
 from collections.abc import Iterator
 import struct
 
+from allotropy.exceptions import AllotropeConversionError
+
 # UNICORN stores each curve array as a .NET BinaryFormatter stream: a 17-byte
 # SerializationHeaderRecord, then an ArraySinglePrimitive record (type 0x0F, object id,
 # element count, primitive type 0x0B = Single), the little-endian floats, and a
@@ -33,9 +35,13 @@ class Converter:
 
 
 def single_array_count(data: bytes) -> int | None:
-    """The element count of a complete ArraySinglePrimitive stream, or None when the
-    bytes are not one (a truncated or differently framed array)."""
-    if len(data) < _DATA_AT + 1:
+    """How many floats to read from an ArraySinglePrimitive stream: its stated count when
+    the stream is complete, or the whole floats it holds when it ends early (a file cut
+    short keeps the values it has). None when the bytes are not framed as one.
+
+    Raises when the framing is recognised but impossible: a negative count, or more bytes
+    than the count accounts for."""
+    if len(data) < _DATA_AT:
         return None
     if (
         data[_RECORD_AT] != _ARRAY_SINGLE_PRIMITIVE
@@ -43,9 +49,19 @@ def single_array_count(data: bytes) -> int | None:
     ):
         return None
     count = int(struct.unpack_from("<i", data, _COUNT_AT)[0])
-    if count < 0 or len(data) != _DATA_AT + 4 * count + 1 or data[-1] != _MESSAGE_END:
-        return None
-    return count
+    complete = _DATA_AT + 4 * count + 1
+    if count < 0 or len(data) > complete:
+        msg = (
+            f"A curve array states {count} values but holds {len(data)} bytes; "
+            "the result file is damaged."
+        )
+        raise AllotropeConversionError(msg)
+    if len(data) == complete:
+        if data[-1] != _MESSAGE_END:
+            msg = "A curve array does not end where its stated length says it does."
+            raise AllotropeConversionError(msg)
+        return count
+    return (len(data) - _DATA_AT) // 4
 
 
 class FloatConverter(Converter):
@@ -59,8 +75,7 @@ class FloatConverter(Converter):
         return struct.unpack_from(f"<{count}f", data, _DATA_AT)
 
     def iter_data(self, data: bytes) -> Iterator[bytes]:
-        # Fixed offsets, for a stream whose framing does not match the record layout
-        # above. A complete stream is read by its element count instead: these offsets
-        # skip its first 5 and last 11 values.
+        # Fixed offsets, only for bytes not framed as an ArraySinglePrimitive record
+        # (no such file is known outside hand-made test data).
         for i in range(47, len(data) - 48, 4):
             yield data[i : i + 4]
