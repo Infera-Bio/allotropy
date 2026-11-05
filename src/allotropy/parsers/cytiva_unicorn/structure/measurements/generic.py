@@ -15,6 +15,7 @@ from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
 )
 from allotropy.parsers.cytiva_unicorn.structure.data_cube.creator import (
     create_data_cube,
+    UnconvertibleCurveError,
 )
 from allotropy.parsers.cytiva_unicorn.structure.data_cube.transformations import (
     Transformation,
@@ -32,6 +33,10 @@ from allotropy.parsers.utils.uuids import random_uuid_str
 # when two curves share a name.
 CONVERTED_CURVES: ContextVar[set[int] | None] = ContextVar(
     "unicorn_converted_curves", default=None
+)
+# The curves that could not form a data cube, each with the reason, for the same scope.
+UNCONVERTED_CURVES: ContextVar[list[str] | None] = ContextVar(
+    "unicorn_unconverted_curves", default=None
 )
 
 
@@ -126,13 +131,20 @@ class UnicornMeasurement(Measurement):
             name_element = curve.find("Name")
 
             if name := name_element.get_text_or_none():
-                data_cube = create_data_cube(
-                    data_cube_handler,
-                    name,
-                    data_cube_component,
-                    transformation,
-                    curve,
-                )
+                try:
+                    data_cube = create_data_cube(
+                        data_cube_handler,
+                        name,
+                        data_cube_component,
+                        transformation,
+                        curve,
+                    )
+                except UnconvertibleCurveError as error:
+                    if (unconverted := UNCONVERTED_CURVES.get()) is not None:
+                        unconverted.append(f"{name}: {error}")
+                    if (converted := CONVERTED_CURVES.get()) is not None:
+                        converted.add(id(curve))  # reported once, not again as generic
+                    return None
                 # A curve with no recorded points (e.g. an unused UV channel) has
                 # empty arrays, which are invalid in the ASM schema.
                 if not any(data_cube.dimensions) and not any(data_cube.measures):

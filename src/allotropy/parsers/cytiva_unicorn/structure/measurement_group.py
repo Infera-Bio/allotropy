@@ -9,9 +9,6 @@ from allotropy.allotrope.schema_mappers.adm.liquid_chromatography.benchling._202
 from allotropy.parsers.cytiva_unicorn.reader.unicorn_zip_handler import (
     UnicornZipHandler,
 )
-from allotropy.parsers.cytiva_unicorn.structure.data_cube.creator import (
-    CurveWithoutAxisError,
-)
 from allotropy.parsers.cytiva_unicorn.structure.measurements.absorbance import (
     AbsorbanceMeasurement1,
     AbsorbanceMeasurement2,
@@ -31,6 +28,7 @@ from allotropy.parsers.cytiva_unicorn.structure.measurements.flow import (
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.generic import (
     CONVERTED_CURVES,
+    UNCONVERTED_CURVES,
     UnicornMeasurement,
 )
 from allotropy.parsers.cytiva_unicorn.structure.measurements.ph import (
@@ -78,13 +76,16 @@ def create_measurement_group(
         handler, curves.find("Curve"), results, analysis_settings
     )
     converted: set[int] = set()
+    unconverted: list[str] = []
     token = CONVERTED_CURVES.set(converted)
+    unconverted_token = UNCONVERTED_CURVES.set(unconverted)
     try:
-        measurements, without_axis = _measurements(
+        measurements = _measurements(
             handler, elements, static_docs, peak_tables, converted
         )
     finally:
         CONVERTED_CURVES.reset(token)
+        UNCONVERTED_CURVES.reset(unconverted_token)
     # Some curves may not be read due not matching any supported measurement type, mark these as read.
     for element in elements:
         element.mark_read("attr:CurveDataType")
@@ -106,7 +107,7 @@ def create_measurement_group(
             "RunIndex": results.get_sub_text_or_none("RunIndex"),
             "RunType": results.get_sub_text_or_none("RunType"),
             "Name": results.get_sub_text_or_none("Name"),
-            "curves without an axis": "; ".join(without_axis) or None,
+            "curves not converted": "; ".join(unconverted) or None,
             **dict(sorted(chromatogram.get_unread().items())),
         },
     )
@@ -118,9 +119,9 @@ def _measurements(
     static_docs: StaticDocs,
     peak_tables: PeakTables,
     converted: set[int],
-) -> tuple[list[UnicornMeasurement | None], list[str]]:
+) -> list[UnicornMeasurement | None]:
     """The named measurements, then one for every other curve the run recorded, as the
-    file names it; and the names of curves that hold amplitudes with no axis."""
+    file names it."""
     measurements: list[UnicornMeasurement | None] = [
         AbsorbanceMeasurement1.create_or_none(
             handler, elements, static_docs, peak_tables
@@ -140,17 +141,12 @@ def _measurements(
         FlowMeasurement.create_or_none(handler, elements, static_docs),
         TemperatureMeasurement.create_or_none(handler, elements, static_docs),
     ]
-    without_axis: list[str] = []
-    for element in elements:
-        if id(element) in converted:
-            continue
-        try:
-            measurements.append(
-                CurveMeasurement.create_or_none(handler, element, static_docs)
-            )
-        except CurveWithoutAxisError:
-            without_axis.append(element.find("Name").get_text_or_none() or "")
-    return measurements, without_axis
+    measurements += [
+        CurveMeasurement.create_or_none(handler, element, static_docs)
+        for element in elements
+        if id(element) not in converted
+    ]
+    return measurements
 
 
 def create_fractions(event_curves: StrictXmlElement) -> list[Fraction]:

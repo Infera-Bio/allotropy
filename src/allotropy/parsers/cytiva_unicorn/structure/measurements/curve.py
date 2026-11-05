@@ -34,8 +34,8 @@ class CurveMeasurement(UnicornMeasurement):
         element: StrictXmlElement,
         static_docs: StaticDocs,
     ) -> UnicornMeasurement | None:
-        """The curve as a measurement, or None when it recorded no points. Raises
-        CurveWithoutAxisError for amplitudes with no axis."""
+        """The curve as a measurement, or None when it recorded no points or could not
+        form a data cube (then listed in the group's "curves not converted")."""
         name = element.find("Name").get_text_or_none()
         if not name:
             return None

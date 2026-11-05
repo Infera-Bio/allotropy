@@ -23,43 +23,48 @@ RETENTION_VOLUME = DataCubeComponent(
     concept="retention volume",
     unit="mL",
 )
+RETENTION_TIME = DataCubeComponent(
+    type_=FieldComponentDatatype.float,
+    concept="retention time",
+    unit="s",
+)
 
 
-class CurveWithoutAxisError(AllotropeConversionError):
-    """A curve that holds amplitudes but neither a volume array nor the start and spacing
-    of an evenly sampled axis."""
+class UnconvertibleCurveError(AllotropeConversionError):
+    """A curve whose recorded arrays cannot form a data cube: amplitudes with no axis to
+    place them on, or one array empty while the other holds values. The chromatogram
+    lists it instead of losing the whole file."""
+
+
+# The schema states retention volume in mL and retention time in s.
+_VOLUME_UNITS = frozenset({"ml", "mL"})
+_SECONDS_PER = {"s": 1.0, "sec": 1.0, "min": 60.0}
 
 
 def _spaced_axis(
     curve: StrictXmlElement | None, count: int
 ) -> tuple[DataCubeComponent, list[float]] | None:
     """The axis of a curve stored as amplitudes only (an evaluation result), from the
-    start and spacing its XML states: in volume when its isochrone is volume, else in
-    time."""
+    start and spacing its XML states, in the coordinate its isochrone names and the unit
+    the XML gives for it. None when any of these is missing or not one the schema holds.
+    """
     if curve is None:
         return None
     start = curve.get_sub_float_or_none("DistanceToStartPoint")
     step = curve.get_sub_float_or_none("DistanceBetweenPoints")
     if start is None or step is None:
         return None
-    if curve.get_sub_text_or_none("IsoChroneType") == "Volume":
-        unit = curve.get_sub_text_or_none("VolumeUnit")
-        component = (
-            RETENTION_VOLUME
-            if unit in (None, "ml", "mL")
-            else DataCubeComponent(
-                type_=FieldComponentDatatype.float,
-                concept="retention volume",
-                unit=unit,
-            )
-        )
-    else:
-        component = DataCubeComponent(
-            type_=FieldComponentDatatype.float,
-            concept="retention time",
-            unit=curve.get_sub_text_or_none("TimeUnit") or "min",
-        )
-    return component, [start + i * step for i in range(count)]
+    isochrone = curve.get_sub_text_or_none("IsoChroneType")
+    if (
+        isochrone == "Volume"
+        and curve.get_sub_text_or_none("VolumeUnit") in _VOLUME_UNITS
+    ):
+        return RETENTION_VOLUME, [start + i * step for i in range(count)]
+    if isochrone == "Time":
+        scale = _SECONDS_PER.get(curve.get_sub_text_or_none("TimeUnit") or "")
+        if scale is not None:
+            return RETENTION_TIME, [(start + i * step) * scale for i in range(count)]
+    return None
 
 
 def create_data_cube(
@@ -83,11 +88,12 @@ def create_data_cube(
     if not volumes and amplitudes:
         spaced = _spaced_axis(curve, len(amplitudes))
         if spaced is None:
-            msg = (
-                f"The curve {label} holds amplitudes but no axis to plot them against."
-            )
-            raise CurveWithoutAxisError(msg)
+            msg = "amplitudes with no axis to place them on"
+            raise UnconvertibleCurveError(msg)
         axis, volumes = spaced
+    if volumes and not amplitudes:
+        msg = f"{len(volumes)} axis values with no amplitudes"
+        raise UnconvertibleCurveError(msg)
     return DataCube(
         label=label,
         structure_dimensions=[axis],
